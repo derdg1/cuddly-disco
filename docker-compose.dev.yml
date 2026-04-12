@@ -1,0 +1,79 @@
+version: "3.9"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Lokale Entwicklung mit Hot-Reload
+# Start: docker-compose -f docker-compose.dev.yml up --build
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app            # Hot-reload: lokaler Code wird eingebunden
+      - pdf_uploads:/app/uploads
+      - pdf_outputs:/app/outputs
+      - db_data:/app/data
+    environment:
+      DATABASE_URL: "sqlite+aiosqlite:////app/data/prepress.db"
+      UPLOAD_DIR: "/app/uploads"
+      OUTPUT_DIR: "/app/outputs"
+      REDIS_URL: "redis://redis:6379/0"
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
+      - pdf_uploads:/app/uploads
+      - pdf_outputs:/app/outputs
+      - db_data:/app/data
+    environment:
+      DATABASE_URL: "sqlite+aiosqlite:////app/data/prepress.db"
+      UPLOAD_DIR: "/app/uploads"
+      OUTPUT_DIR: "/app/outputs"
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.tasks worker --loglevel=info --concurrency=2
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app             # Hot-reload
+      - /app/node_modules
+    environment:
+      VITE_API_URL: "http://localhost:8000"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
+volumes:
+  redis_data:
+  pdf_uploads:
+  pdf_outputs:
+  db_data:

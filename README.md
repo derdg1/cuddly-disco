@@ -29,46 +29,80 @@ Professionelle PDF-Prepress-Bearbeitungs-App, ähnlich wie Esko Automation Engin
 | Job-Queue | Celery + Redis |
 | Datenbank | SQLite (via SQLAlchemy async) |
 
-## Setup & Start
+## Deployment
 
-### Backend
+### Portainer (empfohlen)
 
+**Schritt 1 – Stack anlegen:**
+1. Portainer öffnen → **Stacks** → **Add stack**
+2. Name: `prepress-studio`
+3. **Build method**: Repository
+4. Repository URL: `https://github.com/derdg1/cuddly-disco`
+5. Repository reference: `claude/pdf-prepress-app-ahzRy`
+6. Compose path: `docker-compose.yml`
+
+**Schritt 2 – Umgebungsvariablen (optional):**
+
+| Variable | Standardwert | Beschreibung |
+|----------|-------------|-------------|
+| `APP_PORT` | `80` | Öffentlicher Port der Web-App |
+| `API_PORT` | `8000` | Öffentlicher Port der API |
+| `SECRET_KEY` | `change-me-...` | **Ändern!** Zufälliger Hex-Key |
+| `MAX_UPLOAD_SIZE_MB` | `500` | Max. PDF-Uploadgröße in MB |
+
+**Schritt 3 – Deploy Stack** klicken.
+
+Die App ist dann erreichbar unter `http://<SERVER-IP>:80`
+API-Docs unter `http://<SERVER-IP>:8000/docs`
+
+---
+
+### Lokale Entwicklung (Hot-Reload)
+
+```bash
+docker-compose -f docker-compose.dev.yml up --build
+```
+
+- Frontend mit Hot-Reload: http://localhost:5173
+- Backend mit Auto-Reload: http://localhost:8000
+- API-Docs: http://localhost:8000/docs
+
+### Ohne Docker (manuell)
+
+**Backend:**
 ```bash
 cd backend
 pip install -r requirements.txt
+mkdir -p data uploads outputs
 uvicorn app.main:app --reload
-# API läuft auf http://localhost:8000
-# Swagger-Docs: http://localhost:8000/docs
 ```
 
-### Frontend
-
+**Frontend:**
 ```bash
 cd frontend
 npm install
 npm run dev
-# App läuft auf http://localhost:5173
 ```
 
-### Mit Docker Compose (empfohlen)
-
+**Celery Worker (für Workflow-Jobs):**
 ```bash
-docker-compose up --build
-```
-
-Dann öffnen:
-- Frontend: http://localhost:5173
-- API-Docs: http://localhost:8000/docs
-
-### Redis + Celery Worker (optional, für Workflows)
-
-```bash
-# Redis starten (oder via docker-compose)
+# Redis separat starten
 redis-server
 
-# Worker starten
 cd backend
 celery -A app.workers.tasks worker --loglevel=info
+```
+
+### Produktion bauen & Images taggen
+
+```bash
+# Images bauen
+docker build -t prepress-backend:latest ./backend
+docker build -t prepress-frontend:latest ./frontend
+
+# Optional: In private Registry pushen
+docker tag prepress-backend:latest registry.example.com/prepress-backend:latest
+docker push registry.example.com/prepress-backend:latest
 ```
 
 ## API Endpoints
