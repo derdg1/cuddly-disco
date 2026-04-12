@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+*.db
+*.db-shm
+*.db-wal
+
+# Node
+node_modules/
+dist/
+.cache/
+
+# Storage (runtime files)
+uploads/
+outputs/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
