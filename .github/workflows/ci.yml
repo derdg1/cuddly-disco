@@ -73,15 +73,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: System-Dependencies (für PyMuPDF, pikepdf)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libmupdf-dev libjpeg-dev libopenjp2-7-dev \
+            qpdf libqpdf-dev
+
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
       - name: Install dependencies
         working-directory: backend
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Syntax check
         working-directory: backend
@@ -91,7 +99,16 @@ jobs:
 
       - name: Import check (FastAPI app start)
         working-directory: backend
-        run: python -c "from app.main import app; print('✅ FastAPI app importiert OK')"
+        run: |
+          python -c "
+          import sys
+          try:
+              from app.main import app
+              print('✅ FastAPI app importiert OK')
+          except Exception as e:
+              print(f'❌ Import-Fehler: {e}', file=sys.stderr)
+              sys.exit(1)
+          "
 
   # ── 3. Docker Build ─────────────────────────────────────────────────────────
   docker-build:
@@ -322,7 +339,7 @@ jobs:
           format: sarif
           output: trivy-backend.sarif
           severity: CRITICAL,HIGH
-          exit-code: "0"           # Bricht CI nicht ab, aber meldet Findings
+          exit-code: "0"
 
       - name: Trivy scan – Frontend (SARIF)
         uses: aquasecurity/trivy-action@0.28.0
