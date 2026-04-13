@@ -1,0 +1,191 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# CD – Continuous Delivery
+# Läuft bei: Push auf main (nach erfolgreichem CI)
+#
+# Was passiert:
+#   1. Backend + Frontend Docker-Images bauen
+#   2. Images in GitHub Container Registry (GHCR) pushen
+#      → ghcr.io/derdg1/cuddly-disco/prepress-backend:latest
+#      → ghcr.io/derdg1/cuddly-disco/prepress-frontend:latest
+#   3. Portainer Stack per Webhook automatisch neu deployen (optional)
+#
+# Benötigte GitHub Secrets (Settings → Secrets → Actions):
+#   PORTAINER_WEBHOOK_BACKEND   → Portainer Service Webhook URL (Backend)
+#   PORTAINER_WEBHOOK_FRONTEND  → Portainer Service Webhook URL (Frontend)
+#   (optional – ohne Webhook wird nur nach GHCR gepusht)
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: CD
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:           # Manueller Start möglich
+    inputs:
+      tag:
+        description: "Image-Tag (Standard: latest)"
+        required: false
+        default: "latest"
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/cuddly-disco/prepress-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/cuddly-disco/prepress-frontend
+
+jobs:
+
+  # ── Build & Push Backend Image ──────────────────────────────────────────────
+  build-backend:
+    name: Build & Push Backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # Für GHCR push benötigt
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      image_digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login zu GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker Metadata (Tags & Labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - name: Build & Push Backend Image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Zusammenfassung
+        run: |
+          echo "### Backend Image gepusht ✅" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:** ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest:** ${{ steps.push.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+
+  # ── Build & Push Frontend Image ─────────────────────────────────────────────
+  build-frontend:
+    name: Build & Push Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      image_digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login zu GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - name: Build & Push Frontend Image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Zusammenfassung
+        run: |
+          echo "### Frontend Image gepusht ✅" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:** ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest:** ${{ steps.push.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+
+  # ── Deploy: Portainer Webhook auslösen ──────────────────────────────────────
+  deploy:
+    name: Deploy via Portainer Webhook
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+
+    # Nur deployen wenn Webhook-Secrets gesetzt sind
+    if: >
+      vars.PORTAINER_ENABLED == 'true' ||
+      secrets.PORTAINER_WEBHOOK_BACKEND != ''
+
+    steps:
+      - name: Portainer – Backend Service aktualisieren
+        if: ${{ secrets.PORTAINER_WEBHOOK_BACKEND != '' }}
+        run: |
+          echo "Triggere Portainer Backend Webhook..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.PORTAINER_WEBHOOK_BACKEND }}")
+          echo "HTTP Status: $STATUS"
+          if [ "$STATUS" != "204" ] && [ "$STATUS" != "200" ]; then
+            echo "⚠️  Webhook antwortete mit Status $STATUS"
+            exit 1
+          fi
+          echo "✅ Backend Webhook ausgelöst"
+
+      - name: Portainer – Frontend Service aktualisieren
+        if: ${{ secrets.PORTAINER_WEBHOOK_FRONTEND != '' }}
+        run: |
+          echo "Triggere Portainer Frontend Webhook..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.PORTAINER_WEBHOOK_FRONTEND }}")
+          echo "HTTP Status: $STATUS"
+          if [ "$STATUS" != "204" ] && [ "$STATUS" != "200" ]; then
+            echo "⚠️  Webhook antwortete mit Status $STATUS"
+            exit 1
+          fi
+          echo "✅ Frontend Webhook ausgelöst"
+
+      - name: Deploy-Zusammenfassung
+        run: |
+          echo "### Deployment abgeschlossen 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend  | \`ghcr.io/${{ github.repository_owner }}/cuddly-disco/prepress-backend:latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | \`ghcr.io/${{ github.repository_owner }}/cuddly-disco/prepress-frontend:latest\` |" >> $GITHUB_STEP_SUMMARY

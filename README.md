@@ -29,6 +29,47 @@ Professionelle PDF-Prepress-Bearbeitungs-App, ähnlich wie Esko Automation Engin
 | Job-Queue | Celery + Redis |
 | Datenbank | SQLite (via SQLAlchemy async) |
 
+## CI/CD Pipeline
+
+### Übersicht
+
+```
+Push auf main
+     │
+     ├─► CI (.github/workflows/ci.yml)
+     │     ├── Frontend: TypeCheck + ESLint + Production Build
+     │     ├── Backend:  Syntax + Import Check
+     │     └── Docker:   Build Test (beide Images, kein Push)
+     │
+     └─► CD (.github/workflows/cd.yml)  ← nur wenn CI grün
+           ├── Backend Image  → ghcr.io/derdg1/cuddly-disco/prepress-backend:latest
+           ├── Frontend Image → ghcr.io/derdg1/cuddly-disco/prepress-frontend:latest
+           └── Portainer Webhook → Stack automatisch neu deployen
+```
+
+### GitHub Secrets einrichten
+
+In GitHub → **Settings → Secrets and variables → Actions**:
+
+| Secret | Wert | Woher |
+|--------|------|-------|
+| `PORTAINER_WEBHOOK_BACKEND` | Webhook-URL | Portainer → Services → backend → Webhooks |
+| `PORTAINER_WEBHOOK_FRONTEND` | Webhook-URL | Portainer → Services → frontend → Webhooks |
+
+Automatisches Deploy aktivieren:
+**Settings → Variables → New variable** → `PORTAINER_ENABLED` = `true`
+
+### Portainer: Webhook einrichten
+
+1. Stack deployen (einmalig manuell, siehe unten)
+2. In Portainer: **Services → prepress-backend → Webhooks aktivieren → URL kopieren**
+3. URL als `PORTAINER_WEBHOOK_BACKEND` Secret in GitHub hinterlegen
+4. Gleiches für `prepress-frontend`
+
+→ Ab jetzt: Jeder Push auf `main` baut neue Images und triggert Portainer-Redeploy automatisch.
+
+---
+
 ## Deployment
 
 ### Portainer (empfohlen)

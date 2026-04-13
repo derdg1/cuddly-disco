@@ -1,0 +1,139 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Portainer Stack mit fertigen GHCR-Images (kein Build auf dem Server)
+#
+# Verwendung in Portainer:
+#   Stacks → Add stack → Repository
+#   Compose path: docker-compose.portainer.yml
+#
+# Voraussetzung: CI/CD hat Images bereits nach GHCR gepusht.
+# Images: ghcr.io/derdg1/cuddly-disco/prepress-backend:latest
+#         ghcr.io/derdg1/cuddly-disco/prepress-frontend:latest
+#
+# Für private GHCR-Images: Portainer → Registries → Add registry → GitHub
+# ══════════════════════════════════════════════════════════════════════════════
+
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - prepress_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  backend:
+    image: ghcr.io/derdg1/cuddly-disco/prepress-backend:${TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - pdf_uploads:/app/uploads
+      - pdf_outputs:/app/outputs
+      - db_data:/app/data
+    environment:
+      DATABASE_URL: "sqlite+aiosqlite:////app/data/prepress.db"
+      UPLOAD_DIR: "/app/uploads"
+      OUTPUT_DIR: "/app/outputs"
+      REDIS_URL: "redis://redis:6379/0"
+      CORS_ORIGINS: "http://localhost,http://localhost:${APP_PORT:-80}"
+      SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
+      MAX_UPLOAD_SIZE_MB: "${MAX_UPLOAD_SIZE_MB:-500}"
+    networks:
+      - prepress_net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  worker:
+    image: ghcr.io/derdg1/cuddly-disco/prepress-backend:${TAG:-latest}
+    restart: unless-stopped
+    command: >
+      celery -A app.workers.tasks worker
+      --loglevel=info
+      --concurrency=2
+      --max-tasks-per-child=50
+    volumes:
+      - pdf_uploads:/app/uploads
+      - pdf_outputs:/app/outputs
+      - db_data:/app/data
+    environment:
+      DATABASE_URL: "sqlite+aiosqlite:////app/data/prepress.db"
+      UPLOAD_DIR: "/app/uploads"
+      OUTPUT_DIR: "/app/outputs"
+      REDIS_URL: "redis://redis:6379/0"
+    networks:
+      - prepress_net
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  frontend:
+    image: ghcr.io/derdg1/cuddly-disco/prepress-frontend:${TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-80}:80"
+    networks:
+      - prepress_net
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+networks:
+  prepress_net:
+    driver: bridge
+    name: prepress_network
+
+volumes:
+  redis_data:
+    name: prepress_redis_data
+  pdf_uploads:
+    name: prepress_uploads
+  pdf_outputs:
+    name: prepress_outputs
+  db_data:
+    name: prepress_db
