@@ -84,6 +84,24 @@ jobs:
             org.opencontainers.image.source=https://github.com/derdg1/cuddly-disco
             org.opencontainers.image.documentation=https://github.com/derdg1/cuddly-disco#readme
 
+      - name: Build lokal (Trivy-Scan vor Push)
+        uses: docker/build-push-action@v6
+        with:
+          context:   ./backend
+          push:      false
+          load:      true
+          tags:      prepress-backend:scan
+          cache-from: type=gha,scope=backend
+          cache-to:   type=gha,scope=backend,mode=max
+
+      - name: Trivy Sicherheits-Scan (Backend)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: prepress-backend:scan
+          format: table
+          severity: CRITICAL
+          exit-code: "1"          # CRITICAL → Build abbrechen
+
       - name: Build & Push → GHCR
         id: push
         uses: docker/build-push-action@v6
@@ -93,8 +111,8 @@ jobs:
           tags:      ${{ steps.meta.outputs.tags }}
           labels:    ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to:   type=gha,mode=max
+          cache-from: type=gha,scope=backend
+          cache-to:   type=gha,scope=backend,mode=max
 
       - name: Attestierung (SLSA Provenance)
         uses: actions/attest-build-provenance@v1
@@ -161,6 +179,24 @@ jobs:
             org.opencontainers.image.source=https://github.com/derdg1/cuddly-disco
             org.opencontainers.image.documentation=https://github.com/derdg1/cuddly-disco#readme
 
+      - name: Build lokal (Trivy-Scan vor Push)
+        uses: docker/build-push-action@v6
+        with:
+          context:   ./frontend
+          push:      false
+          load:      true
+          tags:      prepress-frontend:scan
+          cache-from: type=gha,scope=frontend
+          cache-to:   type=gha,scope=frontend,mode=max
+
+      - name: Trivy Sicherheits-Scan (Frontend)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: prepress-frontend:scan
+          format: table
+          severity: CRITICAL
+          exit-code: "1"          # CRITICAL → Build abbrechen
+
       - name: Build & Push → GHCR
         id: push
         uses: docker/build-push-action@v6
@@ -170,8 +206,8 @@ jobs:
           tags:      ${{ steps.meta.outputs.tags }}
           labels:    ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to:   type=gha,mode=max
+          cache-from: type=gha,scope=frontend
+          cache-to:   type=gha,scope=frontend,mode=max
 
       - name: Attestierung (SLSA Provenance)
         uses: actions/attest-build-provenance@v1
